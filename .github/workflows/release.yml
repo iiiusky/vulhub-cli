@@ -1,0 +1,207 @@
+name: latese package
+on:
+  release:
+    types: [ created ]
+jobs:
+  job_darwin:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ macos-latest ]
+        goarch: [ amd64 ]
+    steps:
+      - uses: actions/checkout@v2
+      - name: SET VERSION
+        id: get_version
+        run: |
+          export VERSION=${GITHUB_REF#refs/tags/}
+          echo ::set-output name=version::${VERSION}
+          echo "GET Current Version is $VERSION"
+        shell: bash
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+      - name: Run GoReleaser Darwin
+        uses: goreleaser/goreleaser-action@v2
+        with:
+          version: latest
+          args: release --rm-dist -f .goreleaser.darwin.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: DEL_CONFIG
+        id: Del_config
+        run: |
+          rm -rf dist/config*
+          rm -rf CHANGELOG.md
+          mv dist/*.sha256 dist/vulhub-cli_darwin_amd64/
+      - name: Upload math result for job darwin
+        uses: actions/upload-artifact@v2
+        with:
+          name: Darwin_dist
+          path: dist/
+
+  job_win:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ windows-latest ]
+        goarch: [ amd64 ]
+    steps:
+      - uses: actions/checkout@v2
+      - name: SET VERSION
+        id: get_version
+        run: |
+          export VERSION=${GITHUB_REF#refs/tags/}
+          echo ::set-output name=version::${VERSION}
+          echo "GET Current Version is $VERSION"
+        shell: bash
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+      - name: Run GoReleaser Windows
+        uses: goreleaser/goreleaser-action@v2
+        with:
+          version: latest
+          args: release --rm-dist -f .goreleaser.win.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: DEL_CONFIG
+        id: Del_config
+        run: |
+          rm -rf dist/config*
+          rm -rf CHANGELOG.md
+          mv dist/*.sha256 dist/vulhub-cli_windows_amd64/
+        shell: bash
+      - name: Upload math result for job win
+        uses: actions/upload-artifact@v2
+        with:
+          name: Win_dist
+          path: dist/
+
+  job_linux:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ ubuntu-latest ]
+        goarch: [ amd64 ]
+    steps:
+      - name: Install Basic
+        run: |
+          sudo apt-get install -y libpcap-dev gcc-multilib gcc-mingw-w64 libpthread*
+      - uses: actions/checkout@v2
+      - name: SET VERSION
+        id: get_version
+        run: |
+          export VERSION=${GITHUB_REF#refs/tags/}
+          echo ::set-output name=version::${VERSION}
+          echo "GET Current Version is $VERSION"
+        shell: bash
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+
+      - name: Run GoReleaser Linux
+        if: matrix.os == 'ubuntu-latest'
+        uses: goreleaser/goreleaser-action@v2
+        with:
+          version: latest
+          args: release --rm-dist -f .goreleaser.linux.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: DEL_CONFIG
+        id: Del_config
+        run: |
+          rm -rf dist/config*
+          rm -rf CHANGELOG.md
+          mv dist/*.sha256 dist/vulhub-cli_linux_amd64/
+      - name: Upload math result for job linux
+        uses: actions/upload-artifact@v2
+        with:
+          name: Linux_dist
+          path: dist/
+
+  job_upload:
+    runs-on: ${{ matrix.os }}
+    needs: [ job_darwin,job_win,job_linux ]
+    strategy:
+      matrix:
+        os: [ ubuntu-latest ]
+        goarch: [ amd64 ]
+    steps:
+      - name: SET VERSION
+        id: get_version
+        run: |
+          export VERSION=${GITHUB_REF#refs/tags/}
+          echo ::set-output name=version::${VERSION}
+          echo "GET Current Version is $VERSION"
+        shell: bash
+      - uses: actions/checkout@v2
+#      - name: Install upx
+#        run: |
+#          sudo apt install upx -y
+      - name: SET NOWTIME
+        id: get_nowtime
+        run: |
+          export NOWTIME=`date +%s`
+          echo "GET Current NOWTIME is $NOWTIME"
+          echo "::set-output name=nowtime::"$NOWTIME
+
+      - name: Download math result for Darwin dist
+        uses: actions/download-artifact@v2
+        with:
+          name: Darwin_dist
+      - name: Download math result for Win dist
+        uses: actions/download-artifact@v2
+        with:
+          name: Win_dist
+      - name: Download math result for Linux dist
+        uses: actions/download-artifact@v2
+        with:
+          name: Linux_dist
+      - name: copy release file to dist
+        run: |
+          mkdir dist
+          cp -r vulhub-cli_linux_amd64 dist
+          cp -r vulhub-cli_darwin_amd64 dist
+          cp -r vulhub-cli_windows_amd64 dist
+#      - name: Run upx
+#        run: |
+#          bash .github/workflows/upx.sh
+      - name: Upload COS To Version
+        uses: zkqiang/tencent-cos-action@v0.1.0
+        with:
+          args: |
+            config -a ${{ secrets.COS_SecretID }} -s ${{ secrets.COS_SecretKey }} -b ${{ secrets.COS_BUCKET }} -m 30 -e cos.accelerate.myqcloud.com && upload -r dist/ /builder/vulhub-cli/${{ steps.get_version.outputs.version }}/
+          secret_id: ${{ secrets.COS_SecretID }}
+          secret_key: ${{ secrets.COS_SecretKey }}
+          bucket: ${{ secrets.COS_BUCKET }}
+          region: ${{ secrets.COS_REGION }}
+
+      - name: Copy Binary To Latest
+        if: matrix.os == 'ubuntu-latest'
+        uses: zkqiang/tencent-cos-action@v0.1.0
+        with:
+          args: copy -r ${{ secrets.COS_BUCKET }}.cos.${{ secrets.COS_REGION }}.myqcloud.com/builder/vulhub-cli/${{ steps.get_version.outputs.version }}/ /builder/vulhub-cli/latest/
+          secret_id: ${{ secrets.COS_SecretID }}
+          secret_key: ${{ secrets.COS_SecretKey }}
+          bucket: ${{ secrets.COS_BUCKET }}
+          region: ${{ secrets.COS_REGION }}
+
+      - name: Generate Version File
+        uses: jsdaniell/create-json@1.1.2
+        with:
+          name: "version.json"
+          json: '{"version":"${{ steps.get_version.outputs.version }}","release_time":${{ steps.get_nowtime.outputs.nowtime }}}'
+
+      - name: Upload COS
+        uses: zkqiang/tencent-cos-action@v0.1.0
+        with:
+          args: upload version.json /builder/vulhub-cli/
+          secret_id: ${{ secrets.COS_SecretID }}
+          secret_key: ${{ secrets.COS_SecretKey }}
+          bucket: ${{ secrets.COS_BUCKET }}
+          region: ${{ secrets.COS_REGION }}

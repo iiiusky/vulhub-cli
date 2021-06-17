@@ -1,0 +1,33 @@
+project_name: vulhub-cli
+scoop:
+  name: vulhub-cli
+  commit_msg_template: Auto Update for {{ .ProjectName }} version {{ .Tag }}
+release:
+  prerelease: auto
+  name_template: "v{{.Version}}"
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - id: vulhub-cli
+    env:
+      - CGO_ENABLED=1
+      - GO111MODULE=on
+      - GOFLAGS=-trimpath
+    goos:
+      - linux
+    goarch:
+      - amd64
+    targets:
+      - "linux_amd64"
+checksum:
+  name_template: "{{ .ProjectName }}_linux_amd64.sha256"
+  algorithm: sha256
+archives:
+  - format: binary
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
